@@ -1,0 +1,419 @@
+---
+title: "A descriptive study of the non-small cell lung cancer population in England whilst developing a risk prediction score for systemic anti-cancer therapy related hospital admission: LUng Cancer Improved Decisions (LUCID)"
+author: "Luke Steventon"
+date: "`r Sys.Date()`"
+output: word_document
+---
+Load packages required for R-markdown script:
+```{r setup, include=FALSE}
+library(tidyverse)
+library(kableExtra)
+library(broom)
+library(ggplot2)
+library(skimr)
+library(survminer)
+library(survival)
+library(rbin)
+library(here)
+library(tinytex)
+```
+
+Set working directory and load knitr package.
+```{r}
+knitr::opts_chunk$set(echo = TRUE, eval = FALSE)
+setwd("K:\\QNAP\\BRCT\\SACT project\\LSanalysis\\LUCID")
+getwd() #Check the directory is correctly assigned
+```
+
+Read in all the NCRAS and SACT data as .rda files.
+```{r cars}
+#.csv files should be converted to .rda files to improve processing times
+load("SACTTUMOURNEW_2019.rda") #Systemic anti-cancer therapy dataset - tumour table (new dataset)
+load("SACTTUMOUROLD_2019.rda") #Systemic anti-cancer therapy dataset - tumour table (old dataset)
+load("SACTREGIMENNEW_2019.rda") #Systemic anti-cancer therapy dataset - regimen table (new dataset)
+load("SACTREGIMENOLD_2019.rda") #Systemic anti-cancer therapy dataset - tumour table (old dataset)
+load("SACTCYCLENEW_2019.rda") #Systemic anti-cancer therapy dataset - cycle table (new dataset)
+load("SACTCYCLEOLD_2019.rda") #Systemic anti-cancer therapy dataset - cycle table (old dataset)
+load("SACTDRUGNEW_2019.rda") #Systemic anti-cancer therapy dataset - drug table (new dataset)
+load("SACTDRUGOLD_2019.rda") #Systemic anti-cancer therapy dataset - drug table (old dataset)
+load("patient_table.rda") #National Cancer Registry - patient table
+load("tumour_table.rda") #National Cancer Registry - tumour table
+load("treatment_table,.rda") #National Cancer Registry - treatment table
+load("deprivation_table.rda") #National Cancer Registry - Index of multiple deprivation table
+```
+
+Initial counts of the number of unique PSEUDO_PAT ID's in each dataset. This ID is common between NCRAS and SACT datasets.
+```{r}
+#NCRAS Datasets
+patient_table %>% count(PSEUDO_PAT)#n=839,629 unique PSEUDO_PAT ID's
+tumour_table %>% count(PSEUDO_PAT)#839,629 unique PSEUDO_PAT ID's
+treatment_table %>% count(PSEUDO_PAT)#n=833,049 unique PSEUDO_PAT ID's
+#SACT Datasets
+SACTTUMOURNEW_2019 %>% count(PSEUDO_PAT)
+SACTTUMOUROLD_2019 %>% count(PSEUDO_MERGED_PATIENT_ID) #PSEUDO_PAT is named PSEUDO_MERGED_PATIENT_ID in the old datasets
+SACTREGIMENNEW_2019 %>% count(PSEUDO_PAT)
+SACTREGIMENOLD_2019 %>% count(PSEUDO_MERGED_PATIENT_ID) #PSEUDO_PAT is named PSEUDO_MERGED_PATIENT_ID in the old datasets
+SACTCYCLENEW_2019 %>% count(PSEUDO_PAT)
+SACTCYCLEOLD_2019 %>% count(PSEUDO_MERGED_PATIENT_ID) #PSEUDO_PAT is named PSEUDO_MERGED_PATIENT_ID in the old datasets
+SACTDRUGNEW_2019 %>% count(PSEUDO_PAT)
+SACTDRUGOLD_2019 %>% count(PSEUDO_MERGED_PATIENT_ID) #PSEUDO_PAT is named PSEUDO_MERGED_PATIENT_ID in the old datasets
+```
+
+#############################################
+Data linkage: The first step in defining the study cohort is to link the patient and tumour levels of the NCRAS datasets. Depending on computational power available, it may be necessary to filter for patients with cancer diagnoses of interest in using ICD-10 diagnostic codes. 
+#############################################
+
+1i): Deterministically merge the NCRAS "patient" to NCRAS "tumour" datasets deterministically by common identifier PSEUDO_PAT. This is the only common variable between the two datasets. Both datasets are collated by NCRAS, PSEUDO_PAT is a common ID that links patients information correctly.
+
+The dataset will become larger because many patients have multiple tumour IDS describing more than one cancer diagnosis.
+```{r}
+patient_tumour<-patient_table %>% 
+  merge(tumour_table, by = "PSEUDO_PAT") #Merge can be used as PSEUDO_PAT is the only common identifier between the two tables. 
+
+#This operation links the demographic data from patient and tumour tables. Correct linkage can be confirmed by counting the number of patients before and after linkage to confirm that all are preserved.
+patient_table %>% count(PSEUDO_PAT) #n=839,629 unique patients   
+tumour_table %>% count(PSEUDO_PAT) #n=839,629 unique patients
+patient_tumour %>% count(PSEUDO_PAT) # n=839,629 patients in total in the merged dataset. This confirms the merge linkage has correctly linked all patients.
+```
+
+These data can then be linked using PSEUDO_PAT and PSEUDO_TUMOURID. Deprivation scores are contained in the NCRAS IMD_2019 dataset contains information on deprivation score, based on patient's postcode in England. This is a proxy measure based on socioeconomic and income level in the patient's postcode - however postcode/area information is not available due to identification issues. 
+```{r}
+deprivation_table %>% 
+  count(PSEUDO_PAT) #n=839,629 unique patients in the deprivation table
+
+deprivation_table %>% 
+  count(PSEUDO_TUMOURID) #n=1,022,522 unique tumour IDS
+
+deprivation_table %>% 
+  distinct(PSEUDO_TUMOURID,.keep_all = T) %>% 
+  count(PSEUDO_PAT) %>% 
+  filter(n>1) #n=191,487 patients have more than one tumour ID
+```
+
+1ii): Index of multiple deprivation scores are then linked to the cancer registry data using right_join by PSEUDO_PAT and PSEUDO_TUMOURID. Right_join is required to link the deprivation data to the NCRAS data by PSEUDO_PAT and PSEUDO_TUMOUR ID. Right_join by PSEUDO_PAT and PSEUDO_TUMOURID must be used so that IMD values are linked to the correct tumour diagnosis and point in time that the score was assigned. 
+
+```{r}
+patient_tumour_deprivation<-patient_tumour %>% 
+  right_join(deprivation_table, by = c('PSEUDO_PAT', "PSEUDO_TUMOURID")) 
+
+patient_tumour_deprivation %>% 
+  skimr::skim() #Skimr shows completeness of variables in the dataset. This shows poor completeness of IMD variables.
+```
+
+The previous chunk provides 839629 unique patient IDS with IMD_2015 deprivation scores.
+This was linked to the NCRAS data by PSEUDO_PAT and PSEUDO_TUMOURID, to ensure that the relevant deprivation score was linked to the patient at the same time of cancer diagnosis.
+```{r}
+#Assess the missingness of IMD values using skimr
+patient_tumour_deprivation %>% 
+  skim() %>% 
+  mutate(complete_rate=complete_rate*100)
+
+#IMD2004 - 11.9% complete
+#IMD2007 - 8.13% complete
+#IMD2010 - 10.02% complete
+#IMD2015 - 31.95% complete
+#IMD2015_1 - 72% complete 
+
+#To improve the completeness of data, IMD values from different timepoints may be collapsed into different timepoints to provide data on the patient's socioeconomic score at some point close to their cancer diagnosis date.
+    patient_tumour_deprivation %>% 
+    group_by(PSEUDO_PAT) %>% 
+    mutate(IMD2015_1=ifelse(is.na(IMD2015_1),IMD2015,IMD2015_1)) %>% #If the latest score - IMD2015_1 - is missing, use the value for IMD2015  
+    mutate(IMD2015_1=ifelse(is.na(IMD2015_1),IMD2010,IMD2015_1)) %>% #If IMD is still missing, using IMD2010
+    mutate(IMD2015_1=ifelse(is.na(IMD2015_1),IMD2007,IMD2015_1)) %>% #If IMD is still missing, using IMD2007
+    mutate(IMD2015_1=ifelse(is.na(IMD2015_1),IMD2004,IMD2015_1)) %>%#If IMD is still missing, using IMD2004
+    ungroup()
+    
+#This operation greatly improves completeness of this variable.
+    deprivation_table %>% 
+    skimr::skim() #IMD2015_1 is now 99.9% complete.
+```
+
+Assign the linked NCRAS dataset to a new dataframe:
+```{r}
+ncras_data<-patient_tumour_deprivation
+```
+
+
+#############################################
+2): Exclusion criteria to define the non-small cell lung cancer cohort in the NCRAS registry.
+N=839,629 are contained in the linked NCRAS data before any exclusion criteria are applied.
+#############################################
+2i):Exclusion criteria 1 : include only patients diagnosed between 1/1/2015 - 31/12/2021
+
+N=839,629 before exclusion
+N=499,698 after this exclusion criteria is applied
+N=339,931 patients excluded by diagnosis outside of the 1/1/2015 - 31/12/2019 study period.
+```{r}
+ncras_data %>% count(PSEUDO_PAT) #Linkage check: n=839,629 patients preserved
+
+ncras_data<-ncras_data %>% 
+  mutate(DIAGNOSISDATEBEST=dmy(DIAGNOSISDATEBEST)) %>%  #Convert diagnosis date from character to date format
+  filter(DIAGNOSISDATEBEST>"2014-12-31"&DIAGNOSISDATEBEST<"01-01-2020") #Select patients diagnosed between 01/01/2015 - 13/12/2019
+  
+ncras_data %>% count(PSEUDO_PAT) #n=499,698 patients preserved
+```
+
+2ii):Exclusion criteria 2: include only patients diagnosed with non-small cell lung cancer. This diagnosis is defined by the ICD_10 code for lung cancer diagnoses (ICD-10: C34 and subgroups).
+
+N=499,698 patients before exclusion
+N=62,572 patients after exclusion
+N=437,127 patients excluded by diagnosis other than non-small cell lung cancer.
+
+N=62,573 lung cancer patients are represented in the SACT dataset for the period 01/01/2015 onwards.
+```{r}
+ncras_data<-ncras_data %>% 
+    filter(str_detect(SITE_ICD10_O2,"c34|c.34|C34")) #Select only patients with ICD-10 code describing C.34 non-small cell lung cancer diagnosis or subcategories 
+
+ncras_data %>% count(PSEUDO_PAT) #n=62,573 patients with C34 ICD-10 diagnosis code
+```
+
+
+#############################################
+Data cleaning:
+Cancer staging data varies significantly in coding syntax and therefore data cleaning is required for this variable.
+
+Missing data may be either; a blank cell (NA) or ?/X/U etc.
+Varying terms were cleaned and grouped.
+Missing data was counted before and after this operation.
+```{r}
+ncras_data %>% 
+  skimr::skim() #n=7276 patients have no stage data (of 62,573 total, 11.6%)
+
+ncras_data<-ncras_data %>% 
+          mutate(STAGE_BEST_CLEAN=ifelse(str_detect(STAGE_BEST,"IIA|iia|IIa|iiA|2A|2a"),'2A', STAGE_BEST_CLEAN)) %>% #A new variable "STAGE_BEST_CLEAN" was created which groups different terms for cancer stage into a new column
+          mutate(STAGE_BEST_CLEAN=ifelse(str_detect(STAGE_BEST,"IIb|IIB|iib|iiB|2B|2b"),'2B', STAGE_BEST_CLEAN)) %>% 
+          mutate(STAGE_BEST_CLEAN=ifelse(str_detect(STAGE_BEST,"IIC|iic|IIc|iiC|2c|2C"),'2C', STAGE_BEST_CLEAN)) %>% 
+          mutate(STAGE_BEST_CLEAN=ifelse(str_detect(STAGE_BEST,"IIIA|iiia|IIIa|iiiA|3A|3a"),'3A', STAGE_BEST_CLEAN)) %>% 
+          mutate(STAGE_BEST_CLEAN=ifelse(str_detect(STAGE_BEST,"IIIB|iiib|IIIb|iiiB|3B|3b"),'3B', STAGE_BEST_CLEAN)) %>% 
+          mutate(STAGE_BEST_CLEAN=ifelse(str_detect(STAGE_BEST,"IIIC|iiic|IIIc|iiiC|3C|3c"),'3C', STAGE_BEST_CLEAN)) %>%
+          mutate(STAGE_BEST_CLEAN=ifelse(str_detect(STAGE_BEST,"IVA|IVA|iva|IVa|4A|4a"),'4A', STAGE_BEST_CLEAN)) %>% 
+          mutate(STAGE_BEST_CLEAN=ifelse(str_detect(STAGE_BEST,"IVB|IVb|ivb|IVb|4B|4b"),'4B', STAGE_BEST_CLEAN)) %>% 
+          mutate(STAGE_BEST_CLEAN=ifelse(str_detect(STAGE_BEST,"IVC|IVc|ivc|IVc|4C|4c"),'4C', STAGE_BEST_CLEAN)) %>% 
+          mutate(STAGE_BEST_CLEAN=ifelse(str_detect(STAGE_BEST,"4S"),'4', STAGE_BEST_CLEAN)) %>% #4S is likely to be a data error however this can be grouped into stage 4
+          mutate(STAGE_BEST_CLEAN=ifelse(str_detect(STAGE_BEST,"NA|X|U"),NA, STAGE_BEST_CLEAN)) %>% #If stage is unknown or missing, a blank cell is created 
+          mutate(STAGE_BEST_CLEAN=ifelse(STAGE_BEST=="?",NA, STAGE_BEST_CLEAN)) #If unknown or missing data, blank cell NA. 
+
+ncras_data %>% 
+  filter(is.na(STAGE_BEST_CLEAN)) %>% #Select patients with NA value for cancer stage after data cleaning operations
+  count(PSEUDO_PAT)#n=7276 patients with no stage data (of 62,573 total, 11.6%) after data cleaning
+```
+
+2iii):Exclusion criteria 3: Exclude patients with a diagnosis with stage 3A or lower as we are studying the advanced NSCLC population.
+
+N=62,573 patients before excluding early-stage NSCLC
+n=41,643 patients after this exclusion
+N=20,930 excluded due to early stage (N=13,654) or missing staging data (N=7,276)
+```{r}
+ncras_data %>%
+  count(PSEUDO_PAT) #n=62,573
+
+#Advanced stage >3B selected.
+ncras_data<-ncras_data %>%
+  filter(str_detect(STAGE_BEST_CLEAN, "3B|3C|4")) #Select stage 3B or greater
+
+ncras_data %>%
+  count(PSEUDO_PAT) #n=41,643 patients included with diagnosis at stage >3B or greater.
+
+#N=7,276 excluded due to missing stage data
+#N=13,654 excluded in total due to incorrect or missing stage
+#N=20,930 excluded in total
+```
+
+
+At this point the study cohort has been defined to identify patients with advanced-stage (3b>) non-small cell lung cancer diagnoses in the cancer registry data. Further data cleaning is described later in the linkage procedures. The next steps are to link the separate "Systemic Anti-Cancer Therapy (SACT) Dataset" data to the NCRAS patient data.
+
+
+#############################################
+3: Linkage of the SACT dataset. The SACT data is contained in varying levels of detail, from the top-level "TUMOUR" containing information on specific tumour diagnosis, followed by "REGIMEN" including details of drug regimens, including start dates. This is followed by "CYCLE" containing information on specific cycles given as part of each drug regimen, and "DRUG" which describes individual drug administrations with doses and treatment dates. 
+
+Completeness of these tables varies and will be described where relevant in the linkage procedure.
+
+Various patient identifiers are encoded into the SACT dataset. Depending on whether the data originates from the "new" or "old" extractions, column headers can differ in name. The correct linkage procedures are described below and in the schema attached to the supplementary file. For correct linkage of these data it is essential that column headers are renamed properly and linkage conducted in a specific order, as not all column headers are common between the different levels of the SACT data.
+
+3i): Linkage of the NEW SACT data tables.
+```{r}
+#Firstly start with the TUMOUR level of the SACT data. This is the top-level dataset describing tumour-specific diagnostic information.
+SACTTUMOURNEW_2019 %>% 
+  count(PSEUDO_PAT) #N=
+
+SACTREGIMENNEW_2019 %>% 
+  count(PSEUDO_PAT) #N=
+
+SACTCYCLENEW_2019 %>% 
+  count(PSEUDO_PAT) #N=
+
+SACTDRUGNEW_2019 %>% 
+  count(PSEUDO_PAT) #N=
+
+sact_new<-SACTTUMOURNEW_2019 %>% 
+  left_join(SACTREGIMENNEW_2019, by=c("PSEUDO_PAT","PSEUDO_ENCORE_TUMOUR_ID", "PSEUDO_SACT_TUMOUR_ID")) %>% #Join tumour and regimen tables by PSEUDO_MERGED_PATIENT_ID and PSEUDO_MERGED_TUMOUR_ID
+  left_join(SACTCYCLENEW_2019, by=c("PSEUDO_PAT","PSEUDO_ENCORE_TUMOUR_ID", "PSEUDO_SACT_TUMOUR_ID","PSEUDO_MERGED_REGIMEN_ID")) %>% #The CYCLE data is linked by the same identifiers
+  left_join(SACTDRUGNEW_2019, by=c("PSEUDO_PAT","PSEUDO_ENCORE_TUMOUR_ID", "PSEUDO_SACT_TUMOUR_ID", "PSEUDO_MERGED_REGIMEN_ID"))  #DRUG data is linked by additional identifiers that associate individual drug treatments with a treatment regimen
+
+sact_new %>% #n=XXXX total patients in the new SACT data.
+  count(PSEUDO_PAT)
+```
+
+3ii): Linkage of the NEW SACT data tables.
+```{r}
+SACTTUMOUROLD_2019 %>% 
+  count(PSEUDO_PAT) #N=
+
+SACTREGIMENOLD_2019 %>% 
+  count(PSEUDO_PAT) #N=
+
+SACTCYCLEOLD_2019 %>% 
+  count(PSEUDO_PAT) #N=
+
+SACTDRUGOLD_2019 %>% 
+  count(PSEUDO_PAT) #N=
+
+sact_old<-SACTTUMOUROLD_2019 %>% 
+  left_join(SACTREGIMENOLD_2019, by=c("PSEUDO_MERGED_PATIENT_ID","PSEUDO_MERGED_TUMOUR_ID")) %>% #Join the tumour and regimen data by PSEUDO_MERGED_PATIENT_ID and PSEUDO_MERGED_TUMOUR_ID. This is required because PSEUDO_PAT and PSEUDO_TUMOURID are only contained within the SACTREGIMENOLD_2019 data, and these column identifiers are required to link to NCRAS.
+  left_join(SACTCYCLEOLD_2019, by=c("PSEUDO_MERGED_PATIENT_ID","PSEUDO_MERGED_TUMOUR_ID")) %>% 
+  left_join(SACTDRUGOLD_2019, by=c("PSEUDO_MERGED_PATIENT_ID","PSEUDO_MERGED_TUMOUR_ID")) 
+
+sact_old %>% #n=XXXXX patients in the LINKED old SACT data
+count(PSEUDO_PAT)
+```
+
+The SACT data has now been linked and is contained in two separate files. These files must be appended before linkage to the NCRAS patient cohort. Because of differently named patient identifiers that are not common between these datasets, columns must be renamed to allow appending of the data.N=XXXXX are contained in the in the NEW_SACT data after linkage of tumour, regimen, cycle and drug tables.
+```{r}
+sact_new<-sact_new %>% 
+  rename(PSEUDO_TUMOURID=PSEUDO_ENCORE_TUMOUR_ID) #the new SACT dataset differs in the title of this identifier. This column must be renamed to allow the new SACT and old SACT datasets to be appended
+
+#Then select columns to match between datasets 
+sact_new_rbind<-sact_new %>%
+  select(PSEUDO_PAT,PSEUDO_TUMOURID, DRUG_GROUP, ADMINISTRATION_DATE, PRIMARY_DIAGNOSIS, ORGANISATION_CODE_OF_PROVIDER, STAGE_AT_START)#Create consistent columns for bind
+
+sact_old_rbind<-sact_old %>% 
+  select(PSEUDO_PAT,PSEUDO_TUMOURID, DRUG_GROUP, ADMINISTRATION_DATE, PRIMARY_DIAGNOSIS, ORGANISATION_CODE_OF_PROVIDER, STAGE_AT_START)
+
+#Rbind the datasets to create one dataframe containing all old and new SACT data
+sact_data_complete<-rbind(sact_old_rbind,sact_new_rbind)
+
+sact_data_complete %>% 
+  count(PSEUDO_PAT)
+```
+
+Completeness of the SACT data was then investigated
+```{r}
+sact_data_complete %>% 
+  skimr::skim()
+```
+
+CHECK THAT THE DATASET CONTAINS
+
+PATIENT FACTORS
+AGE
+SEX
+STAGE
+IMD
+DRUG
+TREATMENT DATES
+DOSE
+HEIGHT AND WEIGHT
+VITALSTATUS + DATE
+
+
+#############################################
+SACT and NCRAS data linkage.
+#############################################
+Now that the SACT data has been appended into one file, it can be joined to the NCRAS patient data by PSEUDO_PAT and PSEUDO_TUMOURID.
+4i) Linkage of SACT to NCRAS datasets.
+```{r}
+ncras_data %>% 
+  count(PSEUDO_PAT) #N=XXXXX
+
+linked_dataset<-ncras_data %>% 
+  right_join(sact_data_complete, by = c("PSEUDO_PAT", "PSEUDO_TUMOURID"))
+
+linked_dataset %>% 
+  count(PSEUDO_PAT) #N=XXXXX 
+```
+
+The SACT dataset contains records of drug administrations that are labelled as zero doses. There are also records of erroneous doses (extremely low or high values).
+These doses must be accounted for an any obviously erroneous records removed from the dataset as this can misrepresent the actual treatment record of the patient. 
+
+Cleaning of missing and erroneous drug dose data. This ensures that drug treatments were actually given and we do not include zero-dose.
+n=27,667 in the NEW_SACT data after removing these data.
+N=267 patients excluded by this operation
+```{r}
+linked_dataset %>% 
+  count(PSEUDO_PAT) #N=XXXXX patients
+
+linked_dataset<-linked_dataset %>%
+  mutate(ACTUAL_DOSE_PER_ADMINISTRATION=as.numeric(ACTUAL_DOSE_PER_ADMINISTRATION)) %>% #Change dose to numeric value
+  filter(!is.na(ACTUAL_DOSE_PER_ADMINISTRATION)) %>% #Remove any rows with missing values
+  filter(ACTUAL_DOSE_PER_ADMINISTRATION>0&ACTUAL_DOSE_PER_ADMINISTRATION<10000)#Remove any rows where dose is <0mg or >10000mg as we would not expect these doses for SACT agents
+
+linked_dataset %>% 
+  count(PSEUDO_PAT) #N=XXXXX
+
+#N=XXXX patients excluded by removing missing, zero or erroneous doses
+```
+
+Calculate BMI and BSA for each patient:
+```{r}
+bmi_table<-linked_dataset %>% 
+  filter(HEIGHT_AT_START_OF_REGIMEN>0.6&HEIGHT_AT_START_OF_REGIMEN<2.5) %>% 
+  filter(WEIGHT_AT_START_OF_REGIMEN>20&WEIGHT_AT_START_OF_REGIMEN<250) %>% 
+  mutate(BMI=WEIGHT_AT_START_OF_REGIMEN/(HEIGHT_AT_START_OF_REGIMEN^2)) %>% 
+  mutate(BSA=(HEIGHT_AT_START_OF_REGIMEN*WEIGHT_AT_START_OF_REGIMEN)/3600) %>%  
+  filter(BMI!=Inf) %>% 
+  filter(BSA!=Inf) %>% 
+  filter(BMI<75&BMI>10) %>% 
+  filter(BSA<4&BSA<0.5) %>% 
+  group_by(PSEUDO_PAT, PSEUDO_TUMOURID) %>% 
+  fill(BMI, .direction = "updown") %>% 
+  distinct(PSEUDO_PAT,PSEUDO_TUMOURID,.keep_all=T) %>% 
+  mutate(BMI=mean(BMI)) %>% 
+  ungroup() 
+
+linked_dataset<-bmi_table %>%
+  right_join(linked_dataset, by = c("PSEUDO_PAT","PSEUDO_TUMOURID"))
+```
+
+Calculate the schedule of treatment - 2 or 3 weekly treatment?
+```{r}
+linked_dataset %>% 
+  arrange(PSEUDO_PAT, ADMINISTRATION_DATE) %>% 
+  group(PSEUDO_PAT, ADMINISTRATION_DATE) %>% 
+  mutate(cycle=row_number()) %>% 
+  ungroup
+  
+schedule<-linked_dataset %>% 
+  filter(cycle<4) %>% 
+  group_by(PSEUDO_PAT) %>% 
+  mutate(days=as.numeric(difftime(min(ADMINISTRATION_DATE),max(ADMINISTRATION_DATE),units=days))) %>% 
+  mutate(mean_days=mean(days)) %>% 
+  ungroup() %>% 
+  select(PSEUDO_PAT, days, mean_days)
+  
+linked_dataset<-schedule %>%
+  right_join(linked_dataset, by = "PSEUDO_PAT")
+```
+
+Create column for expected dose (need from Pinkie):
+```{r}
+linked_dataset<-linked_dataset %>% 
+    group_by(PSEUDO_PAT) %>% 
+    mutate(expecteddosefu=ifelse(DRUG_GROUP=="FLUOROURACIL",BSA*500)) %>% 
+    mutate(expecteddoseoxalie=ifelse(DRUG_GROUP=="OXALIPLATIN",BSA*500)) %>% 
+    mutate(actualdosefu=ifelse(DRUG_GROUP=="FLUOROURACIL", BSA*ACTUALDOSE)) %>% 
+    mutate(actualdoseoxalie=ifelse(DRUG_GROUP=="OXALIPLATIN",BSA*ACTUALDOSE)) %>% 
+    mutate(dosedifferencefu=expecteddosefu/actualdosefu*100) %>% 
+    mutate(dosedifferenceoxali=expecteddoseoxali/actualdoseoxalie*100) %>% 
+    ungroup()
+```
+
+```{r}
+linked_dataset
+```
+
+
+Summary table:
+```{r}
+
+```
+
