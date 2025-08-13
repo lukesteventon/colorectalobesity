@@ -336,7 +336,7 @@ linked_dataset2<-linked_dataset %>%
 Isolate patients who had Oxaliplatin + 5FU
 ```{r}
 linked_dataset2 %>%
-  count(PSEUDO_PAT) #n=100,332
+  count(PSEUDO_PAT) #n=107,900
 
 linked_dataset2<-linked_dataset2 %>% 
   mutate(oxaliplatin_flag=ifelse(str_detect(DRUG_GROUP, "OXALIPLATIN"),1,NA)) %>%
@@ -526,14 +526,32 @@ Distinct line for each patient showing percentages for each drug and whether BSA
 ```{r}
 analysis<-linked_dataset6 %>% 
   group_by(PSEUDO_PAT) %>% 
+  mutate(combination=ifelse(str_detect(DRUG_GROUP,"OXALIPLATIN|FLUOROURACIL"),NA,"Combination")) %>% 
+  fill(combination,.direction="updown") %>% 
+  mutate(combination=ifelse(is.na(combination),"FOLFOX",combination)) %>% 
   mutate(ADMINISTRATION_DATE=as.Date(ADMINISTRATION_DATE)) %>% 
   mutate(VITALSTATUSDATE=dmy(VITALSTATUSDATE)) %>% 
   mutate(index=min(ADMINISTRATION_DATE)) %>% 
   mutate(percentage_fu=mean(percentage_fu)) %>%
   mutate(percentage_oxali=mean(percentage_oxali)) %>% 
+  mutate(BSA_over_two=ifelse(BSA>2,"Yes","No")) %>% 
   distinct(PSEUDO_PAT,.keep_all=T) %>% 
   ungroup() %>% 
-  select(PSEUDO_PAT,BSA,schedule:BSA_cap,SEX,ETHNICITYNAME,AGE,index,VITALSTATUS,VITALSTATUSDATE,SITE_CODED_DESC,STAGE_BEST_CLEAN,BMI,dose_difference_oxali,dose_difference_fu)
+  select(PSEUDO_PAT,BSA,BSA_over_two,schedule:BSA_cap,SEX,ETHNICITYNAME,AGE,index,VITALSTATUS,VITALSTATUSDATE,SITE_CODED_DESC,STAGE_BEST_CLEAN,BMI,dose_difference_oxali,dose_difference_fu,combination,ORGANISATION_CODE_OF_PROVIDER)
+```
+
+Link trust code
+```{r}
+trust_codes<-read_csv(
+ "K:/QNAP/BRCT/SACT project/LSanalysis/Rstudio/Surgery to adjuvant treatment/trust_codes2.csv",
+  col_names = TRUE,
+  col_types = cols(.default = col_character()),
+  col_select = NULL) #trust codes for NHS sites
+
+analysis<-analysis %>% 
+  rename(Code=ORGANISATION_CODE_OF_PROVIDER) %>% 
+  left_join(trust_codes, by = "Code") %>% 
+  select(-(County:...10))
 ```
 
 
@@ -567,6 +585,26 @@ summary_data<-summary_data %>%
 summary_data<-summary_data %>% 
   mutate(dose_reduction=ifelse(dose_reduction_FU==1|dose_reduction_oxali==1,1,0)) %>% 
   mutate(dose_reduction=ifelse(is.na(dose_reduction),0,dose_reduction))
+
+summary_data<-summary_data %>% 
+  mutate(STAGE_BEST_CLEAN=ifelse(str_detect(STAGE_BEST_CLEAN,"1"),"1", STAGE_BEST_CLEAN)) %>% 
+  mutate(STAGE_BEST_CLEAN=ifelse(str_detect(STAGE_BEST_CLEAN,"2"),"2", STAGE_BEST_CLEAN)) %>% 
+  mutate(STAGE_BEST_CLEAN=ifelse(str_detect(STAGE_BEST_CLEAN,"3"),"3", STAGE_BEST_CLEAN)) %>% 
+  mutate(STAGE_BEST_CLEAN=ifelse(str_detect(STAGE_BEST_CLEAN,"4"),"4", STAGE_BEST_CLEAN)) %>% 
+  mutate(STAGE_BEST_CLEAN=ifelse(str_detect(STAGE_BEST_CLEAN,"6"),NA, STAGE_BEST_CLEAN))
+```
+
+
+```{r}
+summary_data %>% 
+  count(PSEUDO_PAT)#n=14412
+
+summary_data<-summary_data %>% 
+  filter(STAGE_BEST_CLEAN!="1") %>% 
+  filter(!is.na(STAGE_BEST_CLEAN))
+
+summary_data %>% 
+  count(PSEUDO_PAT)#n=13257
 ```
 
 Summary table:
@@ -574,28 +612,131 @@ Summary table:
 library(gtsummary)
 summary_table<-summary_data %>% 
   ungroup() %>% 
-  select(SEX, AGE, ETHNICITYNAME,SITE_CODED_DESC,STAGE_BEST_CLEAN,schedule, BMI,BSA,BSA_cap, percentage_fu,percentage_oxali, dose_reduction_FU,dose_reduction_oxali,survival,event,dose_reduction,dose_difference_oxali,dose_difference_fu,BSA_cap_dose_reduced) %>% 
-  tbl_summary(by="dose_reduction")
+  select(SEX, AGE, ETHNICITYNAME,SITE_CODED_DESC,STAGE_BEST_CLEAN,schedule, BMI,BSA,BSA_over_two,BSA_cap, percentage_fu,percentage_oxali, dose_reduction_FU,dose_reduction_oxali,survival,event,dose_reduction,dose_difference_oxali,dose_difference_fu,BSA_cap_dose_reduced, combination,`Commissioning region`) %>% 
+  tbl_summary(by="dose_reduction") %>% 
+  add_overall() %>% 
+    add_ci() %>%
+  add_p()
 
 summary_table %>% 
   as_gt() %>% 
-  gt::gtsave("colorectal_summary.docx")
+  gt::gtsave("colorectal_summary_by_dose_reduction.docx")
 
-summary_data %>% 
+table_by_BSA_cap<-summary_data %>% 
   ungroup() %>% 
-  select(SEX, AGE, ETHNICITYNAME,SITE_CODED_DESC,STAGE_BEST_CLEAN,schedule, BMI,BSA, percentage_fu,percentage_oxali, dose_reduction_FU,dose_reduction_oxali,survival,event,dose_reduction,dose_difference_oxali,dose_difference_fu,BSA_cap_dose_reduced) %>% 
+  select(SEX, AGE, ETHNICITYNAME,SITE_CODED_DESC,STAGE_BEST_CLEAN,schedule, BMI,BSA,BSA_over_two, percentage_fu,percentage_oxali, dose_reduction_FU,dose_reduction_oxali,survival,event,dose_reduction,dose_difference_oxali,dose_difference_fu,BSA_cap_dose_reduced, combination,`Commissioning region`) %>% 
   tbl_summary(by="BSA_cap_dose_reduced") %>% 
-  add_overall() %>% 
+  add_overall() %>%
+    add_ci() %>%
   add_p()
+
+table_by_BSA_cap %>% 
+  as_gt() %>% 
+  gt::gtsave("table_by_BSA_cap.docx")
+
+table_by_BSA_cap<-summary_data %>% 
+  ungroup() %>% 
+  select(SEX, AGE, ETHNICITYNAME,SITE_CODED_DESC,STAGE_BEST_CLEAN,schedule, BMI,BSA,BSA_over_two, percentage_fu,percentage_oxali, dose_reduction_FU,dose_reduction_oxali,survival,event,dose_reduction,dose_difference_oxali,dose_difference_fu,BSA_cap_dose_reduced, combination,`Commissioning region`) %>% 
+  tbl_summary(by="Commissioning region") %>% 
+  add_overall() %>% 
+  add_ci() %>% 
+  add_p()
+
+table_by_BSA_cap %>% 
+  as_gt() %>% 
+  gt::gtsave("table_by_region.docx")
+
 
 glm(dose_reduction~BSA_cap+schedule,data=summary_data)
 ```
 Survival analysis:
 ```{r}
-survival<-coxph(Surv(survival, event)~BSA_cap_dose_reduced+STAGE_BEST_CLEAN +AGE+ETHNICITYNAME+SEX+BSA_cap,data=summary_data)
+summary_data$combination<-as.factor(summary_data$combination)
+summary_data$combination<- relevel(summary_data$combination, ref = "FOLFOX")
+summary_data$ETHNICITYNAME<-as.factor(summary_data$ETHNICITYNAME)
+summary_data$ETHNICITYNAME<- relevel(summary_data$ETHNICITYNAME, ref = "White")
 
+
+survival<-coxph(Surv(survival, event)~BSA_cap_dose_reduced+STAGE_BEST_CLEAN +AGE+ETHNICITYNAME+SEX+combination+`Commissioning region`,data=summary_data)
 summary(survival)
+cox_table<-
+  tbl_regression(survival,exponentiate = TRUE)
 
-tbl_regression(survival,exponentiate = TRUE)
+cox_table%>% 
+  as_gt() %>% 
+  gt::gtsave("cox_table.docx")
+```
+
+KM curve:
+```{r}
+library(ggplot2)
+library(survival)
+
+curve_data<-summary_data %>% 
+mutate(survival=survival/365.25)
+
+curve<-survfit(Surv(survival, event)~BSA_cap_dose_reduced,data=curve_data)
+
+kmcurveplot_PDS<-ggsurvplot(curve,
+           pval=F,
+           conf.int=TRUE,
+           conf.int.style="step",
+           xlab="Time in years",
+           xlim=c(0,5),
+           break.time.by=1,
+           ggtheme=theme_minimal(),
+           risk.table="absolute",
+           risk.table.title="Number at risk",
+           risk.table.height=0.3,
+           risk.table.y.text.col=T,
+           risk.table.y.text=T,
+           ncensor.plot=FALSE,srv.median.line="hv",
+           legend.labs=c("No dose capping by BSA","Dose capped BSA>2"))
+
+kmcurveplot_PDS
+```
+```{r}
+
+library(ggplot2)
+library(survival)
+
+curve_data<-summary_data %>% 
+mutate(survival=survival/365.25)
+
+curve<-survfit(Surv(survival, event)~dose_reduction,data=curve_data)
+
+kmcurveplot_PDS<-ggsurvplot(curve,
+           pval=F,
+           conf.int=TRUE,
+           conf.int.style="step",
+           xlab="Time in years",
+           xlim=c(0,5),
+           break.time.by=1,
+           ggtheme=theme_minimal(),
+           risk.table="absolute",
+           risk.table.title="Number at risk",
+           risk.table.height=0.3,
+           risk.table.y.text.col=T,
+           risk.table.y.text=T,
+           ncensor.plot=FALSE,srv.median.line="hv",
+           legend.labs=c("Dose >85%","Dose <85%"))
+
+kmcurveplot_PDS
+
+summary_data$combination<-as.factor(summary_data$combination)
+summary_data$combination<- relevel(summary_data$combination, ref = "FOLFOX")
+summary_data$ETHNICITYNAME<-as.factor(summary_data$ETHNICITYNAME)
+summary_data$ETHNICITYNAME<- relevel(summary_data$ETHNICITYNAME, ref = "White")
+
+
+survival<-coxph(Surv(survival, event)~dose_reduction+STAGE_BEST_CLEAN +AGE+ETHNICITYNAME+SEX+combination+`Commissioning region`,data=summary_data)
+summary(survival)
+cox_table<-
+  tbl_regression(survival,exponentiate = TRUE)
+
+cox_table%>% 
+  as_gt() %>% 
+  gt::gtsave("cox_table_dose_reduction.docx")
+```
 ```
 
