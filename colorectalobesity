@@ -579,7 +579,7 @@ Create year of treatment variable:
 ```{r}
 analysis<-analysis %>% 
   group_by(PSEUDO_PAT) %>% 
-   mutate(year_of_treatment_start=as.character(year(treatmentstart))) %>% 
+   mutate(year_of_treatment_start=as.character(year(index))) %>% 
   ungroup()
 ```
 
@@ -619,6 +619,7 @@ Summary table:
 ```{r}
 library(gtsummary)
 summary_table<-summary_data %>% 
+  distinct(PSEUDO_PAT,.keep_all=T) %>% 
   ungroup() %>% 
   select(SEX, AGE, ETHNICITYNAME,SITE_CODED_DESC,STAGE_BEST_CLEAN,schedule, BMI,BSA,BSA_over_two,BSA_cap, percentage_fu,percentage_oxali, dose_reduction_FU,dose_reduction_oxali,survival,event,dose_reduction,dose_difference_oxali,dose_difference_fu,BSA_cap_dose_reduced, combination,`Commissioning region`,year_of_treatment_start) %>% 
   tbl_summary(by="dose_reduction") %>% 
@@ -632,6 +633,7 @@ summary_table %>%
 
 table_by_BSA_cap<-summary_data %>% 
   ungroup() %>% 
+    distinct(PSEUDO_PAT,.keep_all=T) %>% 
   select(SEX, AGE, ETHNICITYNAME,SITE_CODED_DESC,STAGE_BEST_CLEAN,schedule,year_of_treatment_start, BMI,BSA,BSA_over_two, percentage_fu,percentage_oxali, dose_reduction_FU,dose_reduction_oxali,survival,event,dose_reduction,dose_difference_oxali,dose_difference_fu,BSA_cap_dose_reduced, combination,`Commissioning region`) %>% 
   tbl_summary(by="BSA_cap_dose_reduced") %>% 
   add_overall() %>%
@@ -644,6 +646,7 @@ table_by_BSA_cap %>%
 
 table_by_BSA_cap<-summary_data %>% 
   ungroup() %>% 
+    distinct(PSEUDO_PAT,.keep_all=T) %>% 
   select(SEX, AGE, ETHNICITYNAME,SITE_CODED_DESC,STAGE_BEST_CLEAN,schedule,year_of_treatment_start, BMI,BSA,BSA_over_two, percentage_fu,percentage_oxali, dose_reduction_FU,dose_reduction_oxali,survival,event,dose_reduction,dose_difference_oxali,dose_difference_fu,BSA_cap_dose_reduced, combination,`Commissioning region`) %>% 
   tbl_summary(by="Commissioning region") %>% 
   add_overall() %>% 
@@ -655,8 +658,18 @@ table_by_BSA_cap %>%
   gt::gtsave("table_by_region.docx")
 
 
-glm(dose_reduction~BSA_cap+schedule,data=summary_data)
+summary_table_by_year<-summary_data %>% 
+  ungroup() %>% 
+    distinct(PSEUDO_PAT,.keep_all=T) %>% 
+  select(SEX, AGE, ETHNICITYNAME,SITE_CODED_DESC,STAGE_BEST_CLEAN,schedule, BMI,BSA,BSA_over_two,BSA_cap, percentage_fu,percentage_oxali, dose_reduction_FU,dose_reduction_oxali,survival,event,dose_reduction,dose_difference_oxali,dose_difference_fu,BSA_cap_dose_reduced, combination,`Commissioning region`,year_of_treatment_start) %>% 
+  tbl_summary(by="year_of_treatment_start") %>% 
+  add_overall() 
+
+summary_table_by_year%>% 
+  as_gt() %>% 
+    gt::gtsave("table_by_year.docx")
 ```
+
 Survival analysis:
 ```{r}
 summary_data$combination<-as.factor(summary_data$combination)
@@ -746,7 +759,9 @@ cox_table%>%
   as_gt() %>% 
   gt::gtsave("cox_table_dose_reduction.docx")
 ```
-```load("SACTCYCLEOLD_2019.rda") #Systemic anti-cancer therapy dataset - cycle table (old dataset)
+
+```{r}
+load("SACTCYCLEOLD_2019.rda") #Systemic anti-cancer therapy dataset - cycle table (old dataset)
 load("SACTDRUGNEW_2019.rda") #Systemic anti-cancer therapy dataset - drug table (new dataset)
 load("SACTDRUGOLD_2019.rda") #Systemic anti-cancer therapy dataset - drug table (old dataset)
 load("patient_table.rda") #National Cancer Registry - patient table
