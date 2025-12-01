@@ -1404,6 +1404,9 @@ mutate(survival=survival/365.25)
 
 curve<-survfit(Surv(survival, event)~BSA_cap_dose_reduced,data=curve_data)
 
+#Record survival times for each group
+curve
+
 kmcurveplot_PDS<-ggsurvplot(curve,
            pval=F,
            conf.int=TRUE,
