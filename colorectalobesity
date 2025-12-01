@@ -711,7 +711,7 @@ kmcurveplot_PDS<-ggsurvplot(curve,
            risk.table.height=0.3,
            risk.table.y.text.col=T,
            risk.table.y.text=T,
-           ncensor.plot=FALSE,srv.median.line="hv",
+           ncensor.plot=FALSE,surv.median.line="hv",
            legend.labs=c("No dose capping by BSA","Dose capped BSA>2"))
 
 kmcurveplot_PDS
@@ -739,7 +739,7 @@ kmcurveplot_PDS<-ggsurvplot(curve,
            risk.table.height=0.3,
            risk.table.y.text.col=T,
            risk.table.y.text=T,
-           ncensor.plot=FALSE,srv.median.line="hv",
+           ncensor.plot=FALSE,surv.median.line="hv",
            legend.labs=c("Dose >85%","Dose <85%"))
 
 kmcurveplot_PDS
@@ -1420,7 +1420,7 @@ kmcurveplot_PDS<-ggsurvplot(curve,
            risk.table.height=0.3,
            risk.table.y.text.col=T,
            risk.table.y.text=T,
-           ncensor.plot=FALSE,srv.median.line="hv",
+           ncensor.plot=FALSE,surv.median.line="hv",
            legend.labs=c("No dose capping by BSA","Dose capped BSA>2"))
 
 kmcurveplot_PDS
@@ -1448,7 +1448,7 @@ kmcurveplot_PDS<-ggsurvplot(curve,
            risk.table.height=0.3,
            risk.table.y.text.col=T,
            risk.table.y.text=T,
-           ncensor.plot=FALSE,srv.median.line="hv",
+           ncensor.plot=FALSE,surv.median.line="hv",
            legend.labs=c("Dose >85%","Dose <85%"))
 
 kmcurveplot_PDS
