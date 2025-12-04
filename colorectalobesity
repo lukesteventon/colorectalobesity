@@ -1373,6 +1373,18 @@ table_by_BSA_cap %>%
   as_gt() %>% 
   gt::gtsave("table_by_region.docx")
 
+table_by_BMI<-summary_data %>% 
+  ungroup() %>% 
+  select(SEX, AGE, ETHNICITYNAME,SITE_CODED_DESC,STAGE_BEST_CLEAN,schedule, BMI,BMI2, BSA,BSA_over_two, percentage_fu,percentage_oxali, dose_reduction_FU,dose_reduction_oxali,survival,event,dose_reduction,dose_difference_oxali,dose_difference_fu,BSA_cap_dose_reduced, combination,`Commissioning region`) %>% 
+  tbl_summary(by="BMI2") %>% 
+  add_overall() %>% 
+  add_ci() %>% 
+  add_p()
+
+table_by_BMI %>% 
+  as_gt() %>% 
+  gt::gtsave("table_by_bmi.docx")
+
 
 glm(dose_reduction~BSA_cap+schedule,data=summary_data)
 ```
